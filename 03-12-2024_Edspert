@@ -1,0 +1,184 @@
+//2 Des 2024, Membaca sensor SHT20 dan LDR, hasil pembacaaan dikirimkan ke Broker Edspert lalu ditampilkan pada Node Red
+//pengiriman data menggunakan 1 Topic dengan format Json
+//pd saat bersamaan board ESP32 memerintahkan menghidupkan kipas & pompa air MTR-0022 melalui relay
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <Edspert_sht20.h>
+#include <LDR.h>
+#include <EdspertPubSub.h>
+#include <ArduinoJson.h> 
+
+//========= JSON Declaration ================//
+StaticJsonDocument<200> doc;
+String jsonString,jsonPayload;
+
+//========= Connection Declaration ================//
+// Wifi Setting
+char* ssid = "Galaxy A314C0C";
+char* password = "vnmm5019";
+
+// MQTT Setting
+char *mqttServer = "8.215.56.179";
+int mqttPort = 1883;
+String myClientID = "1000";
+
+String userMQTT = "edspert_batch2";
+String passMQTT = "edspert_batch2";
+String Topic_1 = "edspert/baskoro/temp";
+String Topic_2 = "edspert/baskoro/hum";
+String Topic_3 = "edspert/baskoro/intensitas";
+//String Topic_4 = "edspert/data/data";
+String Topic_5 = "edspert/databaskoro/databaskoro";
+extern String callBackPayload;    // Variabel untuk menerima Payload dari callback
+extern String callBackTopic;      // Variabel untuk menerima Topic dari callback
+
+EdspertPubSub clientMQTT;
+
+
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+
+// Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+//========= SHT Declaration ================//
+HardwareSerial serial(1);
+Edspert_sht20 sht20(&serial, 9600, 16, 17);
+
+//========= LDR Declaration ================//
+#define pinLDR 33
+LDR ldr(pinLDR);
+#define pinRelayKipas 12  //terhubung ke kipas
+#define pinRelayPompa 13  //terhubung ke pompa
+float temperature, humidity, intensitas;
+
+
+
+
+
+void setup() {
+  Serial.begin(115200);
+  splashScreenOled();
+  sht20.begin();
+  ldr.begin();
+
+  // Connect to WiFi
+  clientMQTT.connect_to_AP(ssid,password);
+  clientMQTT.init_to_broker(mqttServer,mqttPort);
+  clientMQTT.connect_to_broker(myClientID,userMQTT,passMQTT); 
+  pinMode(pinRelayKipas, OUTPUT);
+  pinMode(pinRelayPompa, OUTPUT);
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3D for 128x64
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;);
+  }
+  
+
+}
+
+void loop() {
+  // Read Data From Sensor
+  temperature = sht20.readTemperature();
+  humidity = sht20.readHumidity();
+  intensitas = ldr.readIntensitas();
+// Convert to JSoN
+  doc["temp"] = temperature;
+  doc["hum"] = humidity;
+  doc["inten"] = intensitas;
+
+  // Serializasikan objek JSON ke dalam string JSON
+  jsonPayload = "";    // Riset Payload jsonPayload
+  serializeJson(doc, jsonPayload);
+
+  // Publish Data
+  //clientMQTT.mqtt_publish(Topic_1,String(temperature));
+  //clientMQTT.mqtt_publish(Topic_2,String(humidity));
+  //clientMQTT.mqtt_publish(Topic_3,String(intensitas));
+  //clientMQTT.mqtt_publish(Topic_4,String(jsonPayload));
+  clientMQTT.mqtt_publish(Topic_5,String(jsonPayload));
+  displayMeassuring(temperature, humidity, intensitas);
+  delay(3000);
+  display.clearDisplay();
+   
+if(temperature >= 25 && humidity >= 50 && intensitas >= 100){
+    digitalWrite(pinRelayKipas, HIGH);
+    digitalWrite(pinRelayPompa, HIGH);
+    display.println("kipas ON");
+    display.display(); 
+  }
+  else if(temperature < 25 && humidity < 50  && intensitas < 100) {
+    digitalWrite(pinRelayKipas, LOW);
+    digitalWrite(pinRelayPompa, LOW);
+    display.println("kipas OFF");
+    display.display(); 
+  }
+  else {
+    digitalWrite(pinRelayKipas, LOW);
+    digitalWrite(pinRelayPompa, LOW);
+    display.println("kipas OFF");
+  }
+  
+  //Serial.println("Relay OFF");
+  //digitalWrite(pinRelayKipas, LOW);
+  //delay(2000);
+  //Serial.println("Relay ON");
+  //digitalWrite(pinRelayKipas, HIGH);  //normally open
+  //delay(2000);
+}
+
+//================  OLED LCD ==========//
+void splashScreenOled(){
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3D for 128x64
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;);
+  }
+  delay(2000);
+  display.clearDisplay();
+
+  display.setTextSize(2);
+  display.setTextColor(WHITE);
+  display.setCursor(25, 20);
+  // Display static text
+  display.println("EDSPERT");
+  display.setCursor(20, 35);
+  display.println("BOOTCAMP");
+
+  display.display();
+  delay(5000); 
+
+  display.clearDisplay();
+}
+
+void displayMeassuring(float a, float b, float c){
+  display.setTextSize(1.2);
+  display.setTextColor(WHITE);
+  display.setCursor(15, 5);
+  // Display static text
+  display.println("Nilai Parameter");
+
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(10, 15);
+  display.print("Temp: ");
+  display.print(a);
+  display.println(" C");
+
+  display.setCursor(10, 25);
+  display.print("Hum : ");
+  display.print(b);
+  display.println(" %");
+
+  display.setCursor(10, 35);
+  display.print("Inte: ");
+  display.print(c);
+  display.println(" Lux");
+
+  display.println("Baskoro,  2 Des 2024");
+
+  // display.setCursor(10, 45);
+  // display.print("Obj : ");
+  // display.println(d);
+
+  display.display();
+}
